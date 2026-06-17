@@ -155,3 +155,7 @@ If search_listings returns no results and the query included a size, the agent a
 
 ### Style Profile Memory
 The agent saves the user's wardrobe choice to a local profile.json file after each run. On the next run, the user can select "My saved profile" to load it back without re-entering anything. If the file is missing or corrupted, the agent falls back to an empty wardrobe without crashing.
+
+## Video Walkthrough
+
+<video controls src="assets/AI201_project2_walkthrough.mp4" title="Title"></video>
