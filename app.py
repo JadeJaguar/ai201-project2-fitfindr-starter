@@ -16,9 +16,9 @@ import gradio as gr
 
 from agent import run_agent
 from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
+from profile import save_profile, load_profile, profile_exists
 
-
-# ── query handler ─────────────────────────────────────────────────────────────
+# -- query handler --------------------------------
 
 def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     """
@@ -43,11 +43,47 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    if not user_query or not user_query.strip():
+        return "Please enter a search query.", "", ""
 
+    if wardrobe_choice == "Example wardrobe":
+        wardrobe = get_example_wardrobe()
+    elif wardrobe_choice == "My saved profile":
+        wardrobe = load_profile()
+    else:
+        wardrobe = get_empty_wardrobe()
 
-# ── interface ─────────────────────────────────────────────────────────────────
+    save_profile(wardrobe)
+
+    session = run_agent(query=user_query, wardrobe=wardrobe)
+
+    if session["error"]:
+        return session["error"], "", ""
+
+    retry_note = session.get("retry_note") or ""
+
+    item = session["selected_item"]
+    listing_text = (
+        f"{item['title']}\n"
+        f"Price: ${item['price']}\n"
+        f"Platform: {item['platform']}\n"
+        f"Size: {item['size']}\n"
+        f"Condition: {item['condition']}\n"
+        f"Colors: {', '.join(item['colors'])}"
+    )
+
+    retry_note = session.get("retry_note") or ""
+
+    if retry_note:
+        listing_text = retry_note + "\n\n" + listing_text
+
+    price_note = session.get("price_comparison") or ""
+    if price_note:
+        listing_text = listing_text + "\n\n" + price_note
+
+    return listing_text, session["outfit_suggestion"], session["fit_card"]
+
+# -- interface --------------------------------
 
 EXAMPLE_QUERIES = [
     "vintage graphic tee under $30",
@@ -73,7 +109,7 @@ Describe what you're looking for — include size and price if you want to filte
                 scale=3,
             )
             wardrobe_choice = gr.Radio(
-                choices=["Example wardrobe", "Empty wardrobe (new user)"],
+                choices=["Example wardrobe", "My saved profile", "Empty wardrobe (new user)"],
                 value="Example wardrobe",
                 label="Wardrobe",
                 scale=1,

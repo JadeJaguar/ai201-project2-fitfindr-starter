@@ -22,7 +22,7 @@ from utils.data_loader import load_listings
 load_dotenv()
 
 
-# ── Groq client ───────────────────────────────────────────────────────────────
+# -- Groq client --------------------------------
 
 def _get_groq_client():
     """Initialize and return a Groq client using GROQ_API_KEY from .env."""
@@ -34,7 +34,7 @@ def _get_groq_client():
     return Groq(api_key=api_key)
 
 
-# ── Tool 1: search_listings ───────────────────────────────────────────────────
+# -- Tool 1: search_listings --------------------------------
 
 def search_listings(
     description: str,
@@ -69,11 +69,35 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+
+    # Filter by price
+    if max_price is not None:
+        listings = [l for l in listings if l["price"] <= max_price]
+
+    # Filter by size
+    if size is not None:
+        listings = [l for l in listings if size.lower() in l["size"].lower()]
+
+    # Score by keyword overlap with description
+    keywords = description.lower().split()
+
+    def score(listing):
+        text = (
+            listing["title"].lower() + " " +
+            listing["description"].lower() + " " +
+            " ".join(listing["style_tags"]).lower()
+        )
+        return sum(1 for word in keywords if word in text)
+
+    scored = [(score(l), l) for l in listings]
+    scored = [(s, l) for s, l in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    return [l for _, l in scored]
 
 
-# ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
+# -- Tool 2: suggest_outfit --------------------------------
 
 def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     """
@@ -100,11 +124,46 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    client = _get_groq_client()
 
+    if not wardrobe.get("items"):
+        prompt = (
+            f"A user is considering buying this secondhand item:\n"
+            f"Title: {new_item['title']}\n"
+            f"Description: {new_item['description']}\n"
+            f"Style tags: {', '.join(new_item['style_tags'])}\n"
+            f"Colors: {', '.join(new_item['colors'])}\n\n"
+            f"They have not shared their wardrobe. Give them 1 to 2 general outfit ideas "
+            f"for this item. Keep it casual and specific to the item's vibe."
+        )
+    else:
+        wardrobe_lines = "\n".join(
+            f"- {item['name']} ({', '.join(item['style_tags'])})"
+            for item in wardrobe["items"]
+        )
+        prompt = (
+            f"A user is considering buying this secondhand item:\n"
+            f"Title: {new_item['title']}\n"
+            f"Description: {new_item['description']}\n"
+            f"Style tags: {', '.join(new_item['style_tags'])}\n"
+            f"Colors: {', '.join(new_item['colors'])}\n\n"
+            f"Their current wardrobe:\n{wardrobe_lines}\n\n"
+            f"Suggest 1 to 2 specific outfit combinations using the new item and named "
+            f"pieces from their wardrobe. Keep it casual and practical."
+        )
 
-# ── Tool 3: create_fit_card ───────────────────────────────────────────────────
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+        )
+        result = response.choices[0].message.content.strip()
+        return result if result else "Could not generate outfit suggestions. Please try again."
+    except Exception as e:
+        return f"Could not generate outfit suggestions. API error: {str(e)}"
+
+# -- Tool 3: create_fit_card --------------------------------
 
 def create_fit_card(outfit: str, new_item: dict) -> str:
     """
@@ -133,5 +192,75 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Could not create a fit card because the outfit description is missing."
+
+    client = _get_groq_client()
+
+    prompt = (
+        f"Write a 2 to 4 sentence Instagram caption for this thrifted outfit.\n\n"
+        f"Item: {new_item['title']}\n"
+        f"Price: ${new_item['price']}\n"
+        f"Platform: {new_item['platform']}\n"
+        f"Outfit: {outfit}\n\n"
+        f"Rules:\n"
+        f"- Sound casual and authentic, like a real person posting an OOTD\n"
+        f"- Mention the item name, price, and platform once each, naturally\n"
+        f"- Capture the vibe of the outfit in specific terms\n"
+        f"- Do not sound like a product description\n"
+        f"- You can use one emoji if it fits"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=1.2,
+        )
+        result = response.choices[0].message.content.strip()
+        return result if result else "Could not create a fit card. Please try again."
+    except Exception as e:
+        return f"Could not create a fit card. API error: {str(e)}"
+
+# -- Tool 4: compare_price --------------------------------
+
+def compare_price(item: dict) -> str:
+    """
+    Estimates whether an item's price is fair based on comparable listings.
+
+    Args:
+        item: A listing dict to evaluate.
+
+    Returns:
+        A string describing whether the price is fair, cheap, or expensive
+        compared to similar items in the dataset.
+    """
+    listings = load_listings()
+
+    comparable = [
+        l for l in listings
+        if l["category"] == item["category"]
+        and l["id"] != item["id"]
+        and any(tag in l["style_tags"] for tag in item["style_tags"])
+    ]
+
+    if not comparable:
+        return "Not enough similar listings to compare prices."
+
+    avg_price = sum(l["price"] for l in comparable) / len(comparable)
+    item_price = item["price"]
+    diff = item_price - avg_price
+
+    if diff < -5:
+        verdict = "below average"
+    elif diff > 5:
+        verdict = "above average"
+    else:
+        verdict = "about average"
+
+    return (
+        f"This item is priced {verdict} for its category. "
+        f"Similar items go for around ${avg_price:.2f} on average. "
+        f"This one is ${item_price:.2f}."
+    )

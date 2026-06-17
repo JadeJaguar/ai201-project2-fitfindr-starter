@@ -18,10 +18,9 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import search_listings, suggest_outfit, create_fit_card, compare_price
 
-
-# ── session state ─────────────────────────────────────────────────────────────
+# -- session state --------------------------------
 
 def _new_session(query: str, wardrobe: dict) -> dict:
     """
@@ -42,10 +41,12 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
+        "retry_note": None,          # set if size filter was removed on retry
+        "price_comparison": None,    # set by compare_price tool
     }
 
 
-# ── planning loop ─────────────────────────────────────────────────────────────
+# -- planning loop --------------------------------
 
 def run_agent(query: str, wardrobe: dict) -> dict:
     """
@@ -92,13 +93,75 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse the query using simple keyword extraction
+    import re
+
+    size_match = re.search(r'\b(XXS|XS|S|M|L|XL|XXL|S\/M|one size)\b', query, re.IGNORECASE)
+    price_match = re.search(r'\$?(\d+(?:\.\d+)?)', query)
+
+    session["parsed"] = {
+        "description": query,
+        "size": size_match.group(0) if size_match else None,
+        "max_price": float(price_match.group(1)) if price_match else None,
+    }
+
+    # Step 3: Search listings
+    session["search_results"] = search_listings(
+        description=session["parsed"]["description"],
+        size=session["parsed"]["size"],
+        max_price=session["parsed"]["max_price"],
+    )
+
+    if not session["search_results"]:
+        if session["parsed"]["size"]:
+            session["search_results"] = search_listings(
+                description=session["parsed"]["description"],
+                size=None,
+                max_price=session["parsed"]["max_price"],
+            )
+            if session["search_results"]:
+                session["retry_note"] = (
+                    f"No results found for size {session['parsed']['size']}. "
+                    f"Showing results without size filter instead."
+                )
+                # print(f"DEBUG retry_note: {session['retry_note']}")
+            else:
+                session["error"] = (
+                    "No listings found even after removing the size filter. "
+                    "Try a broader description or a higher price limit."
+                )
+                return session
+        else:
+            session["error"] = (
+                "No listings found for your search. "
+                "Try a broader description or a higher price limit."
+            )
+            return session
+
+    # Step 4: Select top result
+    session["selected_item"] = session["search_results"][0]
+
+    # Step 4b: Compare price
+    session["price_comparison"] = compare_price(session["selected_item"])
+
+    # Step 5: Suggest outfit
+    session["outfit_suggestion"] = suggest_outfit(
+        new_item=session["selected_item"],
+        wardrobe=session["wardrobe"],
+    )
+
+    # Step 6: Create fit card
+    session["fit_card"] = create_fit_card(
+        outfit=session["outfit_suggestion"],
+        new_item=session["selected_item"],
+    )
+
     return session
 
 
-# ── CLI test ──────────────────────────────────────────────────────────────────
+# -- CLI test --------------------------------
 
 if __name__ == "__main__":
     from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
