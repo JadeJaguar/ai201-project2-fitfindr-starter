@@ -158,4 +158,9 @@ The agent saves the user's wardrobe choice to a local profile.json file after ea
 
 ## Video Walkthrough
 
+
+
+https://github.com/user-attachments/assets/15082726-1519-4f38-94db-cfda8c3fcd6d
+
+
 <video controls src="assets/AI201_project2_walkthrough.mp4" title="Title"></video>
